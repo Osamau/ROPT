@@ -1,0 +1,381 @@
+---
+title: "Portfolio Optimization Project"
+author: "Emmanuel Osamau"
+date: "12/02/2023"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+
+**Portfolio Optimization Using Genetic Algorithm**
+
+The purpose of this study is to demonstrate how genetic algorithms can be utilized for portfolio improvement. Portfolio optimization tries to produce the highest possible return-to-risk ratio. This can be achieved by altering the weights assigned to each item in the portfolio. Either the portfolio with the lowest risk or the one with the highest expected return for a given level of risk will be the best. The quantmod package will be used to acquire the historical prices for 10 assets, while the GA package will be used to implement the genetic algorithm.The dplyr package will be used to divide the data into training and testing data sets.The packages are attached in the script below:
+
+```{r}
+library(quantmod)
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+library(nse2r)
+library(ggplot2)
+```
+
+**PART 1**
+
+*Choosing Stocks*
+
+The Daily Historical prices from 1/1/2017 to 6/6/2020 for the following stocks on the Frankfurt Stock Market were used: 1.Bayer Aktiengesellschaft, 2.Allianz SE, 3. Fresenius SE, 4.SAP SE, 5.Vonovia SE, 6.Infineon Technologies AG, 7. Linde PLC, 8.BASF SE, 9.Deutsche Post AG and 10.HeidelbergCement AG. These companies are from diverse industries; hence, they may not necessarily display the same stock market performance. The modified daily stock prices were chosen to ensure an accurate stock price record.
+
+```{r}
+ENV.STOCK<- new.env()
+getSymbols(c("BAYN.DE","ALV.DE","FRE.DE","SAP.DE","VNA.DE",
+             "IFX.DE","LIN.DE","BAS.DE","DPW.DE","HEI.DE"),
+             src="yahoo",
+             from= as.Date("2017-1-1"), 
+             to = as.Date("2020-6-6"),
+             peridiocity = "daily", 
+             env = ENV.STOCK) 
+
+#SELECTED ASSETS
+XTS.ADJUSTED<- do.call(merge,eapply(ENV.STOCK,Ad))
+
+#COMPUTING RETURNS ON SELECTED ASSETS
+XTS.LOGRETURNS<- diff(log(XTS.ADJUSTED), lag=1)
+XTS.LOGRETURNS <- na.omit(XTS.LOGRETURNS)
+
+```
+
+The procedure begins by generating a population of potential portfolio allocations (weights) and then analyzes the fitness of each portfolio based on a given objective function ( which is for maximizing return or minimizing risk). The fittest individual (i.e., portfolios) The procedure is then performed 1000 times until the optimal portfolio is discovered. The constraint employed will ensure that the sum of optimal weights is up to 1 which implies the inestor intends to use all of the capital available
+
+```{r}
+#SETTING CONSTRAINT FUNCTION TO UTILIZE ALL INVESTMENT CAPITAL
+constraint <- function(weights) {
+  const.bound <- (sum(weights)-1)**2 
+  
+  for (i in 1:length(weights)) {
+    const.bound <- const.bound + 
+      max(c(0,weights[i]-1))**2 +  
+      max(c(0,-weights[i]))**2    
+  }
+  
+  return (const.bound)
+}
+
+#SETTING THE OBJECTIVE FUNCTION EMBEDDING SHARPE RATIO AND CONSTRAINTS
+fitness <- function(weights) {
+  port.returns <- rowSums(XTS.LOGRETURNS * weights)
+  fitsharp <- mean(port.returns)/sd(port.returns)
+  return(-fitsharp + 100*constraint(weights))
+}
+
+#APPLYING THE GA MODEL FOR OPTIMIZATION
+ga_output <- ga(type = "real-valued", function(weights){-fitness(weights)},
+              lower = rep(0, 10),
+              upper = rep(1, 10),
+              maxiter = 1000, seed = 1)
+
+ga_solution <- as.vector(summary(ga_output)$solution)
+
+#THE OPTIMAL PORTFOLIO WITH RESPECTIVE WEIGHTS
+bestportfolio <- cbind(names(XTS.LOGRETURNS),ga_solution)
+
+```
+
+The best portfolio of optimized weights will allocate 16.4% to LIN.DE., 15.3% to VNA.DE, 2.2% to SAP.DE, 10.4% to HEI.DE, 6.5% to BAS.DE,19.1% to IFX.DE, 3.1% to BAYN.DE, 8.1% to ALV.DE, 15.2% to FRE.DE and 3.8% to DPW.DE.
+
+```{r}
+#TOTAL CAPITAL USED 
+sum(ga_solution)
+
+#COMPUTING RETURNS FOR ALTERNATE DATA FOR THE SAME ASSETS
+ALT.ENV.STOCK<- new.env()
+getSymbols(c("BAYN.DE","ALV.DE","FRE.DE","SAP.DE","VNA.DE",
+             "IFX.DE","LIN.DE","BAS.DE","DPW.DE","HEI.DE"),
+           src="yahoo",
+           from= as.Date("2021-1-1"), 
+           to = as.Date("2022-12-12"),
+           peridiocity = "daily", 
+           env = ALT.ENV.STOCK)
+
+
+```
+
+After identifying the optimal weights, the portfolios performance is evaluated by comparing it to other possible portfolios and observing its future performance.In order to evaluate performance, the technique employed in this project is to use the remaining data as the training set and a subset of the data as the test set.
+
+```{r}
+
+# ALTERNATE SELECTED ASSETS
+ALT.XTS.ADJUSTED<- do.call(merge,eapply(ENV.STOCK,Ad))
+
+#COMPUTING RETURNS ON ALTERNATE SELECTED ASSETS
+ALT.XTS.LOGRETURNS<- diff(log(XTS.ADJUSTED), lag=1)
+ALT.XTS.LOGRETURNS <- na.omit(XTS.LOGRETURNS)
+
+#EVALUATION OF THE PERFORMANCE OF OPTIMIZD PORTFOLIO WITH OTHER PORTFOLIOS
+
+# FOR THE OPTIMAL WEIGHTS
+optportreturn <- rowSums(ALT.XTS.LOGRETURNS *ga_solution )
+meanoptreturn <- mean(optportreturn)
+sdoptreturn <- sd(optportreturn)
+
+# FOR THE BALANCED WEIGHTS
+balweights <-c(0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1)
+balportreturn <- rowSums(ALT.XTS.LOGRETURNS *balweights )
+meanbalreturn <- mean(balportreturn)
+sdbalportreturn <- sd(balportreturn)
+
+# FOR A RANDOM WEIGHTS
+set.seed(140)
+randweights <- runif(10)
+randweights <- randweights/sum(randweights)
+meanoptreturn <- rowSums(ALT.XTS.LOGRETURNS * randweights)
+meanrandreturn <- mean(randportreturn)
+sdrandreturn <- sd(randportreturn)
+
+
+#EVALUATING THE PERFORMANCE OF PORTFOLIOS 
+#USING THE SORTINO RATIO
+# Setting up portfolio means, standard deviations, and minimum acceptable return
+# Calculate the Sortino Ratio for each portfolio
+rf_rate <- 0.01
+
+sortino_opt.portfolio <- (meanoptreturn - rf_rate) / sd(optportreturn[optportreturn < 0])
+sortino_bal.portfolio <- (meanbalreturn - rf_rate) / sd(balportreturn[balportreturn < 0])
+sortino_rand.portfolio <- (meanrandreturn - rf_rate) / sd(randportreturn[randportreturn < 0])
+
+# The Sortino Ratio for each portfolio is given as:
+cat("Sortino Ratio - Optimal Portfolio:",sortino_opt.portfolio , "\n")
+cat("Sortino Ratio - Balanced Portfolio:",sortino_bal.portfolio , "\n")
+cat("Sortino Ratio - Random Portfolio:",sortino_rand.portfolio , "\n")
+```
+
+Given the Sortino values of -0.8571638, -0.8725215, and -0.9452587 for the three portfolios, we can interpret them as follows:The optimal portfolio has a Sortino ratio of -0.8571638, which suggests thatthe portfolio has underperformed the target rate of return while experiencingdownside volatility. This indicates that the portfolios downside risk is higherthan its upside potential.
+
+The balanced portfolio has a slightly lower Sortino ratio of -0.8725215,which implies that it has performed slightly worse than the optimal portfolio.Again, this suggests that the portfolio has underperformed the target rate ofreturn while experiencing downside volatility.
+
+The random portfolio has the lowest Sortino ratio of -0.9452587, indicating the worst risk-adjusted performance among the three portfolios. This portfolio has underperformed the target rate of return by a wider marginand has experienced a higher level of downside volatility. In summary, all three portfolios have performed poorly in terms of risk-adjusted returns, but the optimal portfolio is the best of the three.
+
+```{r}
+
+#EVALUATING PORTFOLIOS WITH DIFFERENT BALANCED RISK AND RETURN
+#SPECIFICALLY MAXIMIZING THE SHARP RATIO
+
+fitness2 <- fitness <- function(weights) {
+  port.returns <- rowSums(XTS.LOGRETURNS * weights)
+  fitsharp <- mean(port.returns)/sd(port.returns)
+  return(fitsharp + 100*constraint(weights))
+}
+ga_output2 <- ga(type = "real-valued", function(weights){-fitness2(weights)},
+                lower = rep(0, 10),
+                upper = rep(1, 10),
+                maxiter = 1000, seed = 1)
+
+
+ga_solution2 <- as.vector(summary(ga_output2)$solution)
+
+#THE OPTIMAL PORTFOLIO WITH RESPECTIVE WEIGHTS WHICH MAXIMIZES RETURNS
+bestportfolio2 <- cbind(names(XTS.LOGRETURNS),ga_solution2)
+
+#TOTAL CAPITAL USED 
+sum(ga_solution2)
+
+#EVALUATING THE PORTFOLIO FOR THE FUNCTION FITNESS2
+# FOR THE OPTIMAL WEIGHTS
+optportreturn2 <- rowSums(ALT.XTS.LOGRETURNS *ga_solution2 )
+meanoptreturn2 <- mean(optportreturn2)
+sdoptreturn2 <- sd(optportreturn2)
+```
+
+The first portfolio has a higher mean return (0.0009311584) compared to the second portfolio (-0.0002696143). This suggests that the first portfolio has historically provided higher returns than the second portfolio. However, we need to consider the standard deviations of the portfolios as well to get a better sense of the risk-return tradeoff.The first portfolio has a lower standard deviation (0.01507522) compared to the second portfolio (0.01672188). This suggests that the first portfolio has historically exhibited less variability in returns compared to the second portfolio. Therefore, the first portfolio can be considered less risky than the second portfolio. In an attempt to maximize returns, the portfolio exhibits a greater volatility leading to a negative expected return
+
+To get a more comprehensive understanding of the risk-return profiles of these two portfolios, we can plot them on a graph, with the x-axis representing the standard deviation (risk) and the y-axis representing the mean return. We can then compare their positions on the graph to get an idea of how their risk-return profiles differ. Overall, when comparing these two portfolios, we see that the first portfolio has historically provided higher returns with less risk than the second portfolio. However, its important to note that past performance does not guarantee future results, and we need to perform more analysis and due diligence before making investment decisions.
+
+```{r}
+
+# Create a data frame with the mean and standard deviation of each portfolio
+portfolio_data <- data.frame(portfolio = c("Portfolio_with_fitness1", 
+                                           "Portfolio_with_fitness2"),
+                             mean = c(0.0009311584, -0.0002696143),
+                             sd = c(0.01507522, 0.01672188))
+
+# Plotting the risk-return profiles using ggplot2
+ggplot(portfolio_data, aes(x = sd, y = mean, color = portfolio)) +
+  geom_point() +
+  geom_text(aes(label = portfolio), hjust = 1.2, vjust = 0.5) +
+  xlab("Standard Deviation (Risk)") +
+  ylab("Mean Return") +
+  ggtitle("Portfolio Risk-Return Profiles")
+```
+
+From the ggplot, it can be observed that the behaviour of the returns on the assets selected favours a risk averse investors as a risk loving investor will make losses due to the nature of the stock volatility
+
+```{r}
+
+#EVALUATING THE PERFORMANCE OF THE PORTFOLIOS
+
+# FOR THE OPTIMAL WEIGHTS
+optportreturn2 <- rowSums(ALT.XTS.LOGRETURNS *ga_solution2)
+meanoptreturn2 <- mean(optportreturn2)
+sdoptreturn2 <- sd(optportreturn2)
+
+rf_rate <- 0.01
+sortino_opt.portfolio2 <- (meanoptreturn2 - rf_rate) / sd(optportreturn2[optportreturn2 < 0])
+sortino_bal.portfolio2 <- (meanbalreturn - rf_rate) / sd(balportreturn[balportreturn < 0])
+sortino_rand.portfolio2 <- (meanrandreturn - rf_rate) / sd(randportreturn[randportreturn < 0])
+
+# The Sortino Ratio for each portfolio under Fitness2 is given as:
+cat("Sortino Ratio - Optimal Portfolio:",sortino_opt.portfolio2 , "\n")
+cat("Sortino Ratio - Balanced Portfolio:",sortino_bal.portfolio , "\n")
+cat("Sortino Ratio - Random Portfolio:",sortino_rand.portfolio , "\n")
+```
+
+The 1st optimal portfolio with the lower Sortino value (-0.8571638) has a worse risk-adjusted return than 2nd optimal portfolio with the higher Sortino value (-0.6093338). This suggests that the first portfolio is experiencing more downside risk than the second portfolio for the same level of return
+
+PART 2 For this portion of the project, 70 different assets were chosen, and the best assets will be chosen based on volatility criteria. In this project, the simplest approach of volatility will be employed. This strategy attempts to depict the degree of asset return movement or volatility '
+
+```{r}
+
+#Selecting 70 Assets from Google Finance
+ENV.STOCKS<- new.env()
+getSymbols(c("V", "AMZN", "GOOG", "AAPL", "MSFT", "JPM", "GS", "XOM", "CVX", "PFE",
+            "MRK", "JNJ", "PG", "KO", "WMT", "V", "MA", "NFLX", "TSLA", "NVDA",
+            "INTC", "AMD", "CSCO", "ORCL", "IBM", "HPQ", "DELL", "NEE", "EXC",
+            "DUK", "SO", "AEP", "XEL", "NEE", "DTE", "EIX", "SRE", "T", "VZ",
+            "TMUS", "CCI", "AMT", "SBAC", "EQIX", "AMT", "BAM", "SPG", "BXP",
+            "PSA", "PLD", "AVB", "ESS", "MAA", "COST", "WBA", "C", "BAC", "WFC",
+            "BRK-B", "JPM", "CME", "ICE", "NDAQ", "LMT", "BA", "RTX", "GD",
+            "CAT"),src="yahoo", from= as.Date("2021-1-1"), 
+            to = as.Date("2022-6-6"),peridiocity = "daily", 
+            env = ENV.STOCKS )
+
+
+#SELECTED 70 ASSETS
+XTS.ADJ<- do.call(merge,eapply(ENV.STOCKS,Ad))
+
+#FINDING RETURNS FOR THE 70 SELECTED ASSETS
+XTS.RETURNS<- diff(log(XTS.ADJ), lag=1)
+XTS.RETURNS <- na.omit(XTS.RETURNS)
+
+
+
+# Using volatility criteria to select the best assets
+volatility <- apply(XTS.ADJ, 2, function(x) {
+  sd(x) * sqrt(252)
+})
+# Calculate the annualized standard deviation (volatility) of returns for each stock
+fitness <- function(x) {
+  # Calculate portfolio return
+  portfolio_return <- rowSums( XTS.RETURNS * x)
+  # Calculate portfolio volatility
+  portfolio_volatility <- sd(portfolio_return) * sqrt(252)
+  # Return the negative of the Sharpe ratio as fitness (to maximize)
+  return(portfolio_return / portfolio_volatility)
+}
+
+
+# Set up the genetic algorithm parameters
+results.sel <- ga(type = "real-valued", function(x){-fitness(x)},
+                  lower = rep(0, ncol(XTS.RETURNS)), 
+                  upper = rep(1, ncol(XTS.RETURNS)),
+                  maxiter = 1000, run = 50, monitor = T, seed = 1)
+```
+
+The best assets have been selected based on the genetic algorithm and the median of volatility being above the median for the asset group
+
+```{r}
+
+med <- median(ga_solution3)
+x_less_than_med <- ifelse(ga_solution3 < med, ga_solution3, NA)
+bestassetvol <- cbind(names(XTS.RETURNS),x_less_than_med)
+bestassetvol <- na.omit(cbind(names(XTS.RETURNS),x_less_than_med))
+bestassetnames <- c(2,4  ,5 , 8  ,9 ,11 ,14 ,15, 16 ,20 ,27 ,28 ,31 ,32 ,33 ,
+                    38 ,40 ,41, 42, 43, 44, 45, 46, 47, 48, 50,
+                    51, 53, 54, 55, 56, 62)
+```
+
+**Evaluation of the Portfolio for the Second Objective.**
+
+```{r}
+# Optimal Portfolio
+
+optimal.portfolio.returns.obj2 <- portfolio.returns.test(optimal.weight2)
+mean.optimal.portfolio.returns.obj2 <- mean(optimal.portfolio.returns.obj2)
+sd.optimal.portfolio.returns.obj2 <- sd(optimal.portfolio.returns.obj2)
+
+```
+
+The best asset selected is given below, and this will be put into the genetic algorithm to determine the best portfolio weights using the sharpe ratio incorporated in fitness1
+
+```{r}
+
+BESTSTOCKS <- XTS.ADJ[, bestassetnames]
+
+'Returns for the selected assets are taken as ahown below'
+BESTSTOCKRETURNS<- diff(log(BESTSTOCKS), lag=1)
+BESTSTOCKRETURNS<-na.omit(BESTSTOCKRETURNS)
+
+# Code for displaying the returns on the portfolio
+bestportreturn <- function(x) {
+  port.returns <- rowSums(BESTSTOCKRETURNS * x)
+  return(port.returns)
+}
+#Sharpe Ratio
+sharpe.best <- function(x){
+  port.returns <- bestportreturn(x)
+  return(mean(port.returns)/sd(port.returns))
+}
+
+# Objective Function
+bestfit <- function(x) {
+  return(-sharpe.best(x) + 100*constraint(x))
+}
+
+# Set up the genetic algorithm parameters
+results.sel <- ga(type = "real-valued", function(x){-bestfit(x)},
+                  lower = rep(0, ncol(BESTSTOCKRETURNS)), 
+                  upper = rep(1, ncol(BESTSTOCKRETURNS)),
+                  maxiter = 1000, run = 50, seed = 1)
+
+ga_select <- as.vector(summary(results.sel)$solution)
+
+#ENSURING THAT THE FULL CAPITAL IS USED
+proj_sum_one <- function(w) {
+  w_sum <- sum(w)
+  if (w_sum == 1) {
+    return(w)  # No need to project if already sum to one
+  } else {
+    return(w / w_sum)  # Rescale to enforce sum to one
+  }
+}
+ga_select<-proj_sum_one(ga_select)
+
+#THE OPTIMAL WEIGHTS FOR THE SELECTED ASSETS BASED ON VOLATILITY IS SHOWN BELOW 
+portfolio.selected.assets <- cbind(names(BESTSTOCKRETURNS),ga_select)
+
+# FOR THE OPTIMAL WEIGHTS OF THE SELECTED ASSETS
+optportreturn.selectedassets <- rowSums(BESTSTOCKRETURNS *ga_select)
+meanoptreturn.selectedassets <- mean(optportreturn.selectedassets)
+sdoptreturn.selectedassets <- sd(optportreturn.selectedassets)
+
+# Sharpe Ratio
+rf <- 0.015 # risk-free rate
+sharpe.ratio.optimal.selectedassets <- (meanoptreturn.selectedassets - rf)/sdoptreturn.selectedassets
+
+#Sortino Ratio
+sortino_opt.selected.assets <- (meanoptreturn.selectedassets - rf) / sd(optportreturn.selectedassets[optportreturn.selectedassets < 0])
+
+cat("Sortino Ratio - Optimal Portfolio:",sortino_opt.selected.assets , "\n")
+cat("Mean of selected portfolio returns:", meanoptreturn.selectedassets, "\n")
+cat("Sd of selected portfolio returns:", sdoptreturn.selectedassets, "\n")
+cat("Sharp ratio for selected assets:", sharpe.ratio.selectedassets, "\n")
+
+```
+
+**Evaluating the performance of the portfolios**
+
+The predicted return of the optimally selected assets is greater than that of the balanced and random assets. The optimally selected portfolio outperforms the original portfolio since the original portfolio with optimal weight did not outperform the balanced and random portfolios in terms of mean and volatility. In addition, the Sharpe and Sortino ratios demonstrated that the optimally chosen assets with their respective optimal weights are the optimal choice for portfolio investments. In conclusion, using a GA to select assets prior to determining the ideal weights improves portfolio selection.
+
+
+
+
+
